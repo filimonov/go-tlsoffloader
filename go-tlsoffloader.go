@@ -15,10 +15,10 @@ var certificatePath string
 var keyPath string
 
 func init() {
-	flag.StringVar(&localAddress, "l", ":44300", "local address")
-	flag.StringVar(&backendAddress, "b", ":8000", "backend address")
-	flag.StringVar(&certificatePath, "c", "cert.pem", "SSL certificate path")
-	flag.StringVar(&keyPath, "k", "key.pem", "SSL key path")
+	flag.StringVar(&localAddress, "l", "localhost:44300", "local address")
+	flag.StringVar(&backendAddress, "b", "gh-api.clickhouse.tech:9440", "backend address")
+	// flag.StringVar(&certificatePath, "c", "cert.pem", "SSL certificate path")
+	// flag.StringVar(&keyPath, "k", "key.pem", "SSL key path")
 }
 
 func main() {
@@ -26,14 +26,7 @@ func main() {
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	cert, err := tls.LoadX509KeyPair(certificatePath, keyPath)
-	if err != nil {
-		log.Fatalf("error in tls.LoadX509KeyPair: %s", err)
-	}
-
-	config := tls.Config{Certificates: []tls.Certificate{cert}, InsecureSkipVerify: true}
-
-	listener, err := tls.Listen("tcp", localAddress, &config)
+	listener, err := net.Listen("tcp", localAddress)
 	if err != nil {
 		log.Fatalf("error in tls.Listen: %s", err)
 	}
@@ -46,32 +39,35 @@ func main() {
 			log.Printf("error in listener.Accept: %s", err)
 			break
 		}
+		log.Printf("local server on: %s, backend server on: %s", localAddress, backendAddress)
 
+		log.Println("client " + conn.RemoteAddr().String() + " connected.")
 		go handle(conn)
 	}
 }
 
 func handle(clientConn net.Conn) {
-	tlsconn, ok := clientConn.(*tls.Conn)
-	if ok {
+	// rootca, err := loadRootCA("ca-certificates.crt")
+	// if err != nil {
+	// 	return nil, err
+	// }
 
-		err := tlsconn.Handshake()
-		if err != nil {
-			log.Printf("error in tls.Handshake: %s", err)
-			clientConn.Close()
-			return
-		}
-
-		backendConn, err := net.Dial("tcp", backendAddress)
-		if err != nil {
-			log.Printf("error in net.Dial: %s", err)
-			clientConn.Close()
-			return
-		}
-
-		go Tunnel(clientConn, backendConn)
-		go Tunnel(backendConn, clientConn)
+	config := tls.Config{
+		// RootCAs: rootca,
+		// InsecureSkipVerify: true
+		// ServerName: "",
+		// PreferServerCipherSuites
 	}
+	backendConn, err := tls.Dial("tcp", backendAddress, &config)
+
+	if err != nil {
+		log.Printf("error in tls.Dial: %s", err)
+		clientConn.Close()
+		return
+	}
+
+	go Tunnel(clientConn, backendConn)
+	go Tunnel(backendConn, clientConn)
 }
 
 func Tunnel(from, to io.ReadWriteCloser) {
